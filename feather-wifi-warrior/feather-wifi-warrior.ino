@@ -1,4 +1,4 @@
-// Date and time functions using a PCF8523 RTC connected via I2C and Wire lib
+// Include the libraries for the OLED display, RTC, SD Card, and WiFi
 #include "RTClib.h"
 #include <SPI.h>
 #include <Wire.h>
@@ -6,11 +6,14 @@
 #include <Adafruit_SH110X.h>
 #include "ESP8266WiFi.h"
 
+//Define the OLED Display
 Adafruit_SH110X display = Adafruit_SH110X(64, 128, &Wire);
 
+// Some strings we will need for formatting SSID's to fit the OLED later
 String readString;
 String newString;
 
+// Stuff for the buttons
 // OLED FeatherWing buttons map to different pins depending on board:
 #if defined(ESP8266)
 #define BUTTON_A  0
@@ -38,29 +41,33 @@ String newString;
 #define BUTTON_C  5
 #endif
 
+//Declare which RTC module is being used
 RTC_PCF8523 rtc;
 
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
 void setup () {
+
+  //Lets Start up the Serial Connection
   Serial.begin(115200);
 
+  //Lets put the WiFi card into station mode and be sure we aren't connected to any networks
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
-
   Serial.println("Wifi Setup Complete");
+
 
 #ifndef ESP8266
   while (!Serial); // wait for serial port to connect. Needed for native USB
 #endif
 
+  //If the RTC can't be found lets abort
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     Serial.flush();
     abort();
   }
 
+  //If the RTC has not been initialized or if it has lost power we need to set the time.
   if (! rtc.initialized() || rtc.lostPower()) {
     Serial.println("RTC is NOT initialized, let's set the time!");
     // When time needs to be set on a new device, or after a power loss, the
@@ -107,41 +114,43 @@ void setup () {
   int offset = round(deviation_ppm / drift_unit);
   // rtc.calibrate(PCF8523_TwoHours, offset); // Un-comment to perform calibration once drift (seconds) and observation period (seconds) are correct
   // rtc.calibrate(PCF8523_TwoHours, 0); // Un-comment to cancel previous calibration
-
   Serial.print("Offset is "); Serial.println(offset); // Print to control offset
 
+  //Lets start up the display for the OLED
   display.begin(0x3C, true); // Address 0x3C default
-  //Clear the display buffer
   display.display();
   display.clearDisplay();
+  //Sets the OLED to a vertical orientation, can be set to 1 for horizontal display
   display.setRotation(2);
-  //Serial.println("Button test");
 
+  //Serial.println("Button test");
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
 
-  // text display tests
+  // Set our Font size, also this is a monochrome display so we only have one color
   display.setTextSize(1);
-  display.setTextColor(SH110X_WHITE);
-  //display.setCursor(100,0);
-  //display.print("Connecting to SSID\n'adafruit':");
-  //display.print("connected!");
-  //display.println("IP: 10.0.1.23");
-  //display.println("Sending val #0");
-  //display.display(); // actually display all of the above
-
+  display.setTextColor(SH110X_WHITE)
 }
 
+//The main program Loop
 void loop () {
+
+  //Lets clear the display
   display.clearDisplay();
+
+  //Lets set the time to a variable called time
   DateTime time = rtc.now();
+
+  //Lets define some format options for printing our timestamps later
   char bigtime[] = "hh:mmAP";
   char timestring[] = "hh:mm:ssAP";
   char datestring[] = "MM/DD/YYYY";
 
+  //Set our Cursor at the very Top of the Display
   display.setCursor(0, 0);
 
+  //Lets initiate a Wifi Scan and print any results we get to the OLED
   int n = WiFi.scanNetworks();
   if (n == 0) {
     display.println("no networks found");
@@ -157,15 +166,14 @@ void loop () {
   }
 
 
-  //display.clearDisplay();
-
-  // display.println(time.toString( datestring ));
-  // display.println(time.toString( timestring ));
+  //Lets move our cursor to the bottom of the Display and display the time
   display.setCursor(0, 120);
   display.print(time.toString( bigtime ));
+  // display.println(time.toString( datestring ));
+  // display.println(time.toString( timestring ));
   display.display();
 
-
+  //Lets print the time out to the serial buffer as well
   Serial.println( time.toString( timestring ));
   delay(5000);
 }
