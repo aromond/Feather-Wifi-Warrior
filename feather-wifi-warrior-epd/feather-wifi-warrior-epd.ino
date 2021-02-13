@@ -1,12 +1,14 @@
 // Include the libraries for the OLED display, RTC, SD Card, and WiFi
 #include "RTClib.h"
 #include <SPI.h>
-#include <SdFat.h>
+//#include <SdFat.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 //#include <Adafruit_SH110X.h>
 #include "WiFi.h"
 #include "Adafruit_ThinkInk.h"
+#include "SD.h"
+#include "FS.h"
 
 //   --- EPD Display Setup ---
 #define EPD_DC      33  // can be any pin, but required!
@@ -18,73 +20,15 @@
 #define SPI_MOSI  18      /* hardware SPI SID/MOSI pin   */
 #define SPI_MISO  19       /* hardware SPI MISO pin   */
 
+#define BUTTON_A 27
+#define BUTTON_B 12
+#define BUTTON_C 13
+
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 
 #define COLOR1 EPD_BLACK
 #define COLOR2 EPD_LIGHT
 #define COLOR3 EPD_DARK
-
-/*
-//   --- SD Card Variables ---
-// SD chip select pin.  Be sure to disable any other SPI devices such as Enet.
-const uint8_t chipSelect = SS;
-
-// Interval between data records in milliseconds.
-// The interval must be greater than the maximum SD write latency plus the
-// time to acquire and write data to the SD to avoid overrun errors.
-// Run the bench example to check the quality of your SD card.
-const uint32_t SAMPLE_INTERVAL_MS = 1000;
-
-// Log file base name.  Must be six characters or less.
-#define FILE_BASE_NAME "Data"
-//------------------------------------------------------------------------------
-// File system object.
-SdFat sd;
-
-// Log file.
-SdFile file;
-
-// Time in micros for next data record.
-uint32_t logTime;
-
-//==============================================================================
-// User functions.  Edit writeHeader() and logData() for your requirements.
-
-const uint8_t ANALOG_COUNT = 4;
-
-//   --- SD Card Functions ---
-// Write data header.
-void writeHeader() {
-  file.print(F("micros"));
-  for (uint8_t i = 0; i < ANALOG_COUNT; i++) {
-    file.print(F(",adc"));
-    file.print(i, DEC);
-  }
-  file.println();
-}
-//------------------------------------------------------------------------------
-// Log a data record.
-void logData() {
-  uint16_t data[ANALOG_COUNT];
-
-  // Read all channels to avoid SD write latency between readings.
-  for (uint8_t i = 0; i < ANALOG_COUNT; i++) {
-    data[i] = analogRead(i);
-  }
-  // Write data to file.  Start with log time in micros.
-  file.print(logTime);
-
-  // Write ADC data to CSV record.
-  for (uint8_t i = 0; i < ANALOG_COUNT; i++) {
-    file.write(',');
-    file.print(data[i]);
-  }
-  file.println();
-}
-//==============================================================================
-// Error messages stored in flash.
-#define error(msg) sd.errorHalt(F(msg))
-*/
 
 //   --- OLED Variables ---
 //Define the OLED Display
@@ -93,41 +37,8 @@ void logData() {
 // Some strings we will need for formatting SSID's to fit the OLED later
 String readString;
 String newString;
+float voltage;
 
-/*
-// Stuff for the buttons
-// OLED FeatherWing buttons map to different pins depending on board:
-#if defined(ESP8266)
-#define BUTTON_A  0
-#define BUTTON_B 16
-#define BUTTON_C  2
-#elif defined(ESP32)
-#define BUTTON_A 15
-#define BUTTON_B 32
-#define BUTTON_C 14
-#elif defined(ARDUINO_STM32_FEATHER)
-#define BUTTON_A PA15
-#define BUTTON_B PC7
-#define BUTTON_C PC5
-#elif defined(TEENSYDUINO)
-#define BUTTON_A  4
-#define BUTTON_B  3
-#define BUTTON_C  8
-#elif defined(ARDUINO_NRF52832_FEATHER)
-#define BUTTON_A 31
-#define BUTTON_B 30
-#define BUTTON_C 27
-#else // 32u4, M0, M4, nrf52840 and 328p
-#define BUTTON_A  9
-#define BUTTON_B  6
-#define BUTTON_C  5
-#endif
-
-//lets set some state variables for our button presses
-int stateA = 0;
-int stateB = 0;
-int stateC = 0;
-*/
 
 //   --- WIFI Variables ---
 //Lets set some variables to store info from our WiFi Scans
@@ -149,10 +60,73 @@ Single_Network Network[50];
 //Declare which RTC module is being used
 RTC_PCF8523 rtc;
 
+void writeFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Writing file: %s\n", path);
+
+    File file = fs.open(path, FILE_WRITE);
+    if(!file){
+        Serial.println("Failed to open file for writing");
+        return;
+    }
+    if(file.print(message)){
+        Serial.println("File written");
+    } else {
+        Serial.println("Write failed");
+    }
+    file.close();
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Appending to file: %s\n", path);
+
+    File file = fs.open(path, FILE_APPEND);
+    if(!file){
+        Serial.println("Failed to open file for appending");
+        return;
+    }
+    if(file.print(message)){
+        Serial.println("Message appended");
+    } else {
+        Serial.println("Append failed");
+    }
+    file.close();
+}
+
+void readFile(fs::FS &fs, const char * path){
+    Serial.printf("Reading file: %s\n", path);
+
+    File file = fs.open(path);
+    if(!file){
+        Serial.println("Failed to open file for reading");
+        return;
+    }
+
+    Serial.print("Read from file: ");
+    while(file.available()){
+        Serial.write(file.read());
+    }
+    file.close();
+}
+
 void setup () {
 
+  
   //Lets Start up the Serial Connection
   Serial.begin(115200);
+
+
+  // More SD Stuff
+
+  if(!SD.begin()){
+        Serial.println("Card Mount Failed");
+        return;
+    }
+    uint8_t cardType = SD.cardType();
+
+    if(cardType == CARD_NONE){
+        Serial.println("No SD card attached");
+        return;
+    }
 
   //Lets put the WiFi card into station mode and be sure we aren't connected to any networks
   WiFi.mode(WIFI_STA);
@@ -221,27 +195,16 @@ void setup () {
   // rtc.calibrate(PCF8523_TwoHours, 0); // Un-comment to cancel previous calibration
   Serial.print("Offset is "); Serial.println(offset); // Print to control offset
 
-/*
-  //Lets start up the display for the OLED
-  display.begin(0x3C, true); // Address 0x3C default
-  display.display();
-  display.clearDisplay();
-  //Sets the OLED to a vertical orientation, can be set to 1 for horizontal display
-  display.setRotation(2);
 
-  //Serial.println("Button test");
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
-
-  // Set our Font size, also this is a monochrome display so we only have one color
-  display.setTextSize(1);
-  display.setTextColor(SH110X_WHITE);
-*/
 }
 
 //The main program Loop
 void loop () {
+  
+ // writeFile(SD, "/SSIDs.txt", "SSIDs/n");
   display.begin(THINKINK_GRAYSCALE4);
   display.clearBuffer();
   display.setTextSize(1);
@@ -255,11 +218,12 @@ void loop () {
   //Lets set the time to a variable called time
   DateTime time = rtc.now();
 
+
   //Lets define some format options for printing our timestamps later using toString() from the RTC library.
   char bigtime[] = "hh:mmAP";
   char timestring[] = "hh:mm:ssAP";
   char datestring[] = "MM/DD/YYYY";
-
+/*
   //Set our Cursor at the very Top of the Display
   display.setCursor(0, 0);
 
@@ -274,28 +238,53 @@ void loop () {
     display.println();
     display.setTextSize(1);
     display.println("RSSI SSID");
+    display.println();
     for (int i = 0; i < n; ++i) {
       readString = (WiFi.SSID(i));
       newString = readString.substring(0, 16);
       display.print(WiFi.RSSI(i));
       display.print("  ");
       display.println(newString);
+      appendFile(SD, "/SSIDs.txt", WiFi.SSID(i).c_str());
+      appendFile(SD, "/SSIDs.txt", "/n");
       delay(10);
     }
   }
+*/
 
 
-  //Lets move our cursor to the bottom of the Display and display the time
-  display.setTextSize(3);
-  display.setCursor(0, 270);
+  
+
+  //Lets move our cursor to the bottom of the Display and display the battery voltage
+  //display.clearBuffer();
+  display.setTextSize(1);
+  display.setCursor(95, 285);
+  voltage = analogRead(A13);
+  display.print((voltage/4095)*2*3.3);
+  display.println("v");
+
+  //lets print the time at the bottom too
+  display.setTextSize(2);
+  display.setCursor(0,280);
   display.print(time.toString( bigtime ));
-  // display.println(time.toString( datestring ));
-  // display.println(time.toString( timestring ));
-  display.display();
+  display.setCursor(0,0);
+    if (!digitalRead(BUTTON_A)) {
+    display.print("a");
+    display.display();
+  }
+    if (!digitalRead(BUTTON_B)) {
+    display.print("b");
+    display.display();
+  }
+    if (!digitalRead(BUTTON_C)) {
+    display.print("c");
+    display.display();
+  }
 
   //Lets print the time out to the serial buffer as well
   Serial.println( time.toString( timestring ));
-  delay(5000);
+  //readFile(SD, "/SSIDs.txt");
+  //delay(20000);
 }
 
 void epdprint(char *text, uint16_t color){
